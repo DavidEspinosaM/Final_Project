@@ -1,146 +1,117 @@
-import streamlit as st
 import pandas as pd
+import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-import warnings
-from sklearn.model_selection import train_test_split, GridSearchCV
-from sklearn.preprocessing import StandardScaler, LabelEncoder, OneHotEncoder
-from sklearn.linear_model import LinearRegression, LogisticRegression
-from sklearn.tree import DecisionTreeClassifier
+from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.impute import SimpleImputer
+from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, confusion_matrix, classification_report, precision_score, recall_score, f1_score
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.linear_model import LogisticRegression
 import pickle
 
-warnings.filterwarnings('ignore')
+# Streamlit app title
+st.title("Stroke Prediction App")
 
-# Load Stroke Dataset
-data = pd.read_csv(r"C:\Users\BRYAN\Documents\Final project\modified_healthcare_data.csv")
+# Step 1: Upload dataset
+st.header("Upload Dataset")
+uploaded_file = st.file_uploader("Upload your dataset in CSV format", type="csv")
 
-# Handle missing values
-data['bmi'].fillna(data['bmi'].mean(), inplace=True)
+if uploaded_file:
+    # Load dataset
+    df = pd.read_csv(uploaded_file)
+    st.write("Dataset loaded successfully!")
+    
+    # Data overview
+    st.header("Data Overview")
+    st.write("First 10 rows of the dataset:")
+    st.write(df.head(10))
 
-# Encode categorical variables
-categorical_columns = ['gender', 'ever_married', 'work_type', 'Residence_type', 'smoking_status']
-for col in categorical_columns:
-    le = LabelEncoder()
-    data[col] = le.fit_transform(data[col])
+    # Step 2: Preprocessing
+    st.header("Data Preprocessing")
+    st.write("Preparing data for model training...")
 
-# Split the data into input (X) and output (y)
-X = data.drop(['id', 'stroke'], axis=1)  # Drop 'id' and target variable
-y = data['stroke']
+    # Identify and encode categorical columns
+    categorical_columns = df.select_dtypes(include=['object']).columns
+    for col in categorical_columns:
+        df[col] = LabelEncoder().fit_transform(df[col])
 
-# Split into training and testing sets
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    # Handle missing values
+    imputer = SimpleImputer(strategy='mean')
+    df = pd.DataFrame(imputer.fit_transform(df), columns=df.columns)
 
-# Standardize the data
-scaler = StandardScaler()
-X_train = scaler.fit_transform(X_train)
-X_test = scaler.transform(X_test)
+    # Select features and target column
+    st.write("Select Features and Target Column:")
+    features = st.multiselect("Select Features", df.columns.tolist(), default=df.columns.tolist()[:-1])
+    target = st.selectbox("Select Target Column", df.columns.tolist(), index=len(df.columns) - 1)
 
-# Title of the app
-st.title("Stroke Prediction and Churn Analysis App")
+    if not features or not target:
+        st.warning("Please select at least one feature and a target column.")
+    else:
+        X = df[features]
+        y = df[target]
 
-# Data overview
-st.header("Stroke Data Overview (First 10 Rows)")
-st.write(data.head(10))
+        # Train/test split
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-# Churn Dataset
-st.header("Churn Dataset Analysis")
-churn_data = pd.read_csv(r'C:\Users\BRYAN\Documents\Final project\modified_healthcare_data.csv')
+        # Standardize the data
+        scaler = StandardScaler()
+        X_train = scaler.fit_transform(X_train)
+        X_test = scaler.transform(X_test)
 
-# Check columns in churn dataset to make sure 'Exited' exists
-st.write(churn_data.columns)
+        # Step 3: Model Selection
+        st.header("Model Selection")
+        model_type = st.selectbox("Choose a Model", ["Logistic Regression", "Decision Tree", "Random Forest"])
 
-# If 'Exited' exists, drop it, otherwise, update to the correct column name
-if 'Exited' in churn_data.columns:
-    X_churn = churn_data.drop(['Exited'], axis=1)
-    y_churn = churn_data['Exited']
+        if model_type == "Logistic Regression":
+            st.write("Training Logistic Regression...")
+            model = LogisticRegression(solver='liblinear')
+            model.fit(X_train, y_train)
+
+        elif model_type == "Decision Tree":
+            max_depth = st.slider("Max Depth of Decision Tree", min_value=1, max_value=20, value=10)
+            st.write("Training Decision Tree...")
+            model = DecisionTreeClassifier(max_depth=max_depth, random_state=42)
+            model.fit(X_train, y_train)
+
+        elif model_type == "Random Forest":
+            n_estimators = st.slider("Number of Estimators", min_value=10, max_value=200, value=100)
+            max_depth_rf = st.slider("Max Depth of Random Forest", min_value=1, max_value=20, value=10)
+            st.write("Training Random Forest...")
+            model = RandomForestClassifier(n_estimators=n_estimators, max_depth=max_depth_rf, random_state=42)
+            model.fit(X_train, y_train)
+
+        # Evaluate model
+        st.header("Model Performance")
+        y_pred = model.predict(X_test)
+        accuracy = accuracy_score(y_test, y_pred)
+        st.write(f"Accuracy: {accuracy:.2f}")
+        st.write("Confusion Matrix:")
+        st.write(confusion_matrix(y_test, y_pred))
+        st.write("Classification Report:")
+        st.text(classification_report(y_test, y_pred))
+
+        # Save the trained model
+        model_file = f"{model_type.replace(' ', '_')}_model.pkl"
+        with open(model_file, 'wb') as f:
+            pickle.dump(model, f)
+
+        st.success(f"Model saved as {model_file}")
+
+        # Step 4: Prediction for New Data
+        st.header("Predict Stroke Risk for New Data")
+        user_input = {}
+        for feature in features:
+            user_input[feature] = st.number_input(f"Enter value for {feature}", value=float(df[feature].mean()))
+        user_input_df = pd.DataFrame([user_input])
+
+        # Standardize user input
+        user_input_scaled = scaler.transform(user_input_df)
+
+        # Predict stroke risk
+        user_prediction = model.predict(user_input_scaled)
+        st.write(f"Predicted Stroke Risk: {'Yes' if user_prediction[0] == 1 else 'No'}")
 else:
-    st.error("The 'Exited' column is not found in the churn dataset. Please verify the column name.")
-    # Handle the error (for example, set y_churn to None or exit the app)
-    y_churn = None
-    X_churn = None
-
-if X_churn is not None and y_churn is not None:
-    X_churn.drop(['RowNumber', 'CustomerId', 'Surname'], axis=1, inplace=True)
-
-    # Encode categorical variables for Churn Dataset
-    X_churn['Gender'] = le.fit_transform(X_churn['Gender'])
-    ohe = OneHotEncoder()
-    encoder = ohe.fit_transform(X_churn[['Geography']])
-    encoder_arr = encoder.toarray()
-    df_geog = pd.DataFrame(encoder_arr, columns=ohe.get_feature_names_out(['Geography']), dtype='int')
-    X_churn = pd.concat([X_churn, df_geog], axis=1)
-    X_churn.drop(['Geography'], axis=1, inplace=True)
-
-    # Standardize numerical columns for Churn Dataset
-    num_cols = X_churn[['Age', 'Tenure', 'Balance', 'NumOfProducts', 'EstimatedSalary', 'CreditScore']]
-    num_cols = scaler.fit_transform(num_cols)
-    num_df = pd.DataFrame(num_cols, columns=['Age', 'Tenure', 'Balance', 'NumOfProducts', 'EstimatedSalary', 'CreditScore'])
-    X_churn_final = pd.concat([num_df, X_churn.drop(num_cols.columns, axis=1)], axis=1)
-
-    # Split Churn data into training and testing
-    X_train_churn, X_test_churn, y_train_churn, y_test_churn = train_test_split(X_churn_final, y_churn, test_size=0.25, random_state=1)
-
-    # Model selection
-    st.header("Model Selection")
-    model_choice = st.selectbox("Select a Model", ("Linear Regression", "Random Forest", "Decision Tree", "Logistic Regression"))
-
-    models = {
-        "Linear Regression": LinearRegression(),
-        "Random Forest": RandomForestClassifier(),
-        "Decision Tree": DecisionTreeClassifier(),
-        "Logistic Regression": LogisticRegression()
-    }
-
-    selected_model = models[model_choice]
-    selected_model.fit(X_train, y_train)
-
-    # Evaluate Stroke Model
-    y_pred = selected_model.predict(X_test)
-    st.subheader("Stroke Model Evaluation")
-    st.write(f"Accuracy: {accuracy_score(y_test, y_pred):.2f}")
-    st.write("Confusion Matrix:")
-    st.write(confusion_matrix(y_test, y_pred))
-    st.write("Classification Report:")
-    st.text(classification_report(y_test, y_pred))
-
-    # Train and Evaluate Churn Models
-    lr = LogisticRegression()
-    lr.fit(X_train_churn, y_train_churn)
-    y_pred_churn = lr.predict(X_test_churn)
-    st.subheader("Churn Model Evaluation")
-    st.write(f"Logistic Regression Accuracy: {accuracy_score(y_test_churn, y_pred_churn):.2f}")
-    st.write("Confusion Matrix:")
-    st.write(confusion_matrix(y_test_churn, y_pred_churn))
-    st.write(f"Precision: {precision_score(y_test_churn, y_pred_churn):.2f}")
-    st.write(f"Recall: {recall_score(y_test_churn, y_pred_churn):.2f}")
-    st.write(f"F1 Score: {f1_score(y_test_churn, y_pred_churn):.2f}")
-
-    # Hyperparameter Tuning for Random Forest
-    st.header("Hyperparameter Tuning")
-    parameters = {
-        'criterion': ['gini', 'entropy'],
-        'max_depth': [4, 5, 6, 7, 8, 9, 10],
-        'max_features': ['auto', 'sqrt', 'log2'],
-        'n_estimators': [100, 150, 200],
-        'n_jobs': [-1]
-    }
-    grid = GridSearchCV(estimator=RandomForestClassifier(), param_grid=parameters, cv=5, verbose=3, scoring='f1')
-    grid.fit(X_train_churn, y_train_churn)
-
-    best_params = grid.best_params_
-    st.write("Best Parameters for Random Forest:")
-    st.write(best_params)
-    st.write(f"Best F1 Score: {grid.best_score_:.2f}")
-
-    # Save the tuned model
-    rf_new = RandomForestClassifier(**best_params)
-    rf_new.fit(X_train_churn, y_train_churn)
-    with open('model.pkl', 'wb') as f:
-        pickle.dump(rf_new, f)
-    with open('scaler.pkl', 'wb') as f:
-        pickle.dump(scaler, f)
-
-    st.success("Model and scaler saved successfully.")
+    st.write("Please upload a dataset to proceed.")
